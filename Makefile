@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= ghcr.io/savedhq/operator:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -112,12 +112,14 @@ build: manifests generate fmt vet ## Build manager binary.
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
 
-# If you wish to build the manager image targeting other platforms you can use the --platform flag.
-# (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
-# More info: https://docs.docker.com/develop/develop-images/build_enhancements/
+# The Dockerfile packages a prebuilt binary rather than compiling in-image, so
+# the binary for the host arch has to exist in dist/ first. Cross-compile for
+# another arch with: make docker-build GOARCH=arm64
+GOARCH ?= $(shell go env GOARCH)
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH) go build -trimpath -ldflags="-s -w" -o dist/manager-$(GOARCH) cmd/main.go
+	$(CONTAINER_TOOL) build --platform linux/$(GOARCH) -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -129,16 +131,20 @@ docker-push: ## Push docker image with the manager.
 # - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+# Matches what CI publishes. No Dockerfile.cross rewriting is needed: the image
+# has no build stage, so buildx only assembles per-arch binaries we compile here.
+PLATFORMS ?= linux/arm64,linux/amd64
+COMMA := ,
+ARCHS = $(subst linux/,,$(subst $(COMMA), ,$(PLATFORMS)))
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+	for arch in $(ARCHS); do \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags="-s -w" -o dist/manager-$$arch cmd/main.go || exit 1; \
+	done
 	- $(CONTAINER_TOOL) buildx create --name operator-builder
 	$(CONTAINER_TOOL) buildx use operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} .
 	- $(CONTAINER_TOOL) buildx rm operator-builder
-	rm Dockerfile.cross
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.

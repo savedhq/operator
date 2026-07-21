@@ -36,11 +36,22 @@ needed to express intent, not the final API. Sample:
 ## Development
 
 ```sh
-make build      # manifests + generate + fmt + vet, then compile cmd/main.go
-make test       # the above, plus the envtest suite
-make lint       # golangci-lint (custom build, plugins from .custom-gcl.yml)
-make run        # run the controller against your current kubeconfig
+make build          # manifests + generate + fmt + vet, then compile cmd/main.go
+make test           # the above, plus the envtest suite
+make lint           # golangci-lint (custom build, plugins from .custom-gcl.yml)
+make run            # run the controller against your current kubeconfig
+make docker-build   # cross-compile into dist/, then package the image
 ```
+
+The image (`ghcr.io/savedhq/operator`) runs the controller itself — it is not the
+`local-worker` image, which is built in its own repo and referenced by
+`LocalWorker.spec.image`.
+
+**The Dockerfile packages a prebuilt binary; it does not compile.** `dist/manager-<arch>`
+must exist before `docker build` — `make docker-build` and the CI `compile` job both
+handle that. Compiling in-image instead makes buildx run the Go toolchain under QEMU
+for the non-native arch, which took ~40min per build; cross-compiling natively takes
+~30s for both arches.
 
 `make manifests` and `make generate` write into `config/` and `api/` — that output is
 **committed**, and CI fails if it drifts from what the types produce.
@@ -51,9 +62,11 @@ stock kubebuilder flow; see the
 
 ## CI
 
-- `.github/workflows/ci.yml` — `lint` and `test` on every push and PR, then `build`
-  pushes a multi-arch image to `ghcr.io/savedhq/operator` on pushes to `main` and on
-  `v*` tags (`:<short-sha>` + `:latest` on main, `:<tag>` on a tag).
+- `.github/workflows/ci.yml` — `lint` and `test` on every push and PR, then
+  `compile` (one native job per arch) and `build`, which pushes a multi-arch image to
+  `ghcr.io/savedhq/operator` on pushes to `main` and on `v*` tags (`:<short-sha>` +
+  `:latest` on main, `:<tag>` on a tag). Every job is capped at
+  `timeout-minutes: 10`.
 - `.github/workflows/scan.yml` — gitleaks on push, PR and weekly.
 
 E2E tests (`make test-e2e`) need a local Kind cluster and are **not** wired into CI
