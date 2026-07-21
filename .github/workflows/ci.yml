@@ -1,0 +1,101 @@
+# Job graph, left to right:
+#   lint  — golangci-lint (config pinned in .golangci.yml)
+#   test  — manifests/generate/fmt/vet + envtest suite
+#   build — multi-arch image to GHCR
+#
+# `make test` regenerates CRDs and deepcopy before running, so a drifted
+# checked-in manifest shows up as a dirty tree — see the diff-check step.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: go.sum
+      - run: make lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: go.sum
+      - run: make test
+
+      # controller-gen output is committed; if `make test` changed it, the
+      # generated files in the PR are stale.
+      - name: Check generated files are up to date
+        run: git diff --exit-code -- config/ api/ internal/
+
+  build:
+    needs: [lint, test]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        # GHCR reads the package description off the *index* annotation, not the
+        # per-manifest one it annotates by default — without `index` here the
+        # package page shows "No description provided".
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index,manifest
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # git tag -> :v0.1.0 ; main -> :<short-sha> + :latest
+          tags: |
+            type=ref,event=tag
+            type=sha,format=short,enable={{is_default_branch}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.description=Kubernetes operator for saved.sh — CRDs and controllers
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          # The Dockerfile compiles from source via TARGETARCH, so unlike the
+          # other Go repos there is no separate cross-compile job to feed it.
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

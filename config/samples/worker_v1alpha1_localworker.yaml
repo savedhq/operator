@@ -1,0 +1,12 @@
+apiVersion: worker.saved.sh/v1alpha1
+kind: LocalWorker
+metadata:
+  labels:
+    app.kubernetes.io/name: operator
+    app.kubernetes.io/managed-by: kustomize
+  name: localworker-sample
+spec:
+  image: ghcr.io/savedhq/local-worker:latest
+  # Secret holding the worker's config.yaml under that key. A Secret rather than
+  # a ConfigMap because it carries a WorkOS org-scoped API key.
+  configSecretRef: localworker-config
