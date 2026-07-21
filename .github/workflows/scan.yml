@@ -1,0 +1,34 @@
+# Replaces the GitLab SAST + Secret-Detection templates this repo ran. There is
+# no build here, so secret detection is the only meaningful check (SAST has no
+# code to analyse).
+#
+# GitHub's native secret scanning needs Advanced Security, which private repos on
+# the free plan don't get, so gitleaks runs as an ordinary CI step.
+name: scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # The gitleaks *action* requires a paid licence for organisation repos; the
+      # tool itself is MIT, so run the image directly. --redact keeps any match
+      # out of the log, per the never-echo-secrets rule.
+      - run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
+            detect --source=/repo --redact --verbose
