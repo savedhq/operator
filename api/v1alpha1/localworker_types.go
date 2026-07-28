@@ -27,7 +27,7 @@ import (
 //
 // A LocalWorker is one customer-side backup worker: a Deployment running the
 // local-worker image, configured entirely by the `config.yaml` it is handed.
-// Placeholder shape only — the fields below are the minimum needed to express
+// Placeholder shape only, the fields below are the minimum needed to express
 // the intent, not the final API.
 type LocalWorkerSpec struct {
 	// image is the local-worker container image to run.

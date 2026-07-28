@@ -30,6 +30,6 @@ go.work
 *.kubeconfig
 
 # Cross-compiled binaries for the container image. Scoped to the binaries, not
-# all of dist/ — `make build-installer` writes dist/install.yaml there, which is
+# all of dist/, `make build-installer` writes dist/install.yaml there, which is
 # a release artifact meant to be committed.
 dist/manager-*
