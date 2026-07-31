@@ -1,12 +1,21 @@
 # Job graph, left to right:
 #   lint, golangci-lint (config pinned in .golangci.yml)
 #   test, manifests/generate/fmt/vet + envtest suite
-#   compile, one job per arch, cross-compiled natively (no QEMU)
-#   build, assemble & push the multi-arch image to GHCR
+#   build, cross-compile + assemble & push the multi-arch image to GHCR
 #
-# The Dockerfile packages a prebuilt binary rather than compiling in-image.
-# Compiling in-image makes buildx run the Go toolchain under QEMU for the
-# non-native arch, which took ~40min for a single build.
+# There is deliberately no `compile` job. It used to cross-compile per arch and
+# hand the binaries to `build` as Actions artifacts, which coupled every release
+# to the artifact storage quota, when that filled on 2026-07-30 the upload
+# failed, `compile` failed, and no image was published at all. The Dockerfile is
+# multi-stage now and buildx does the cross-compiling natively, so nothing here
+# touches artifact storage.
+#
+# The Dockerfile DOES compile in-image now, but its build stage is pinned to
+# `--platform=$BUILDPLATFORM`, so the Go toolchain runs on the runner's NATIVE
+# arch and cross-compiles via GOARCH. An unpinned build stage is what makes
+# buildx run the toolchain under QEMU (~40min for a single build); the pin is
+# load-bearing, do not remove it.
+#
 name: ci
 
 on:
@@ -23,6 +32,12 @@ env:
 
 permissions:
   contents: read
+
+# A rapid second push makes the first run's image obsolete before it publishes,
+# so cancel it rather than paying for both. Tag builds are never cancelled.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   lint:
@@ -54,32 +69,8 @@ jobs:
       - name: Check generated files are up to date
         run: git diff --exit-code -- config/ api/ internal/
 
-  # Cross-compile per arch. Binaries feed the build job as artifacts, so the
-  # image build itself never executes target-arch code and needs no QEMU.
-  compile:
-    needs: [lint, test]
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      matrix:
-        goarch: [amd64, arm64]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: 'go.mod'
-          cache: true
-          cache-dependency-path: go.sum
-      - run: CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} go build -trimpath -ldflags="-s -w" -o dist/manager-${{ matrix.goarch }} cmd/main.go
-      - uses: actions/upload-artifact@v7
-        with:
-          name: manager-${{ matrix.goarch }}
-          path: dist/manager-${{ matrix.goarch }}
-          retention-days: 1
-
   build:
-    needs: compile
+    needs: test
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -88,13 +79,6 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
-
-      # Both arch binaries land back in dist/ as the Dockerfile expects.
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: manager-*
-          path: dist
-          merge-multiple: true
 
       - uses: docker/setup-buildx-action@v4
 

@@ -1,8 +1,15 @@
 # More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
-# Ignore everything by default and re-include only needed files.
-**
-
-# The image packages a prebuilt binary, the Go source is never copied in, so
-# the only thing the build context needs is the per-arch manager binary that
-# the compile step (CI) or `make docker-build` (local) writes here.
-!dist/manager-*
+#
+# The image used to package a prebuilt binary, so this file ignored everything
+# (`**`) and re-included only `dist/manager-*`. The Dockerfile is multi-stage
+# now and compiles from source in the build stage, so the Go source has to reach
+# the build context. Same denylist shape as the other Go repos.
+.git
+.github
+Dockerfile
+.dockerignore
+*.md
+bin
+dist
+testbin
+config

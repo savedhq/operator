@@ -1,0 +1,54 @@
+# Bounds how many container versions this repo keeps in GHCR.
+#
+# Why this exists: private package storage shares one quota with Actions
+# artifacts, and nothing here had a retention policy. By 2026-07-30 the org had
+# accumulated 690 versions, filled the quota, and every Go repo's image build
+# started failing at `upload-artifact` with no obvious connection to the cause.
+# A one-off cleanup fixed the symptom; this keeps it from regrowing.
+#
+# COUNTING GOTCHA, min-versions-to-keep counts *version objects*, not releases.
+# One multi-arch push creates five: the tagged index, one manifest per arch, and
+# two attestation manifests. The arch manifests are untagged, and deleting them
+# out from under a surviving index makes that tag unpullable. Keeping a multiple
+# of five keeps whole pushes intact, so 50 ~= the last 10 releases. Raise in
+# steps of five.
+name: prune-packages
+
+on:
+  schedule:
+    # Sundays, 04:00 UTC.
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/delete-package-versions@v5
+        with:
+          owner: ${{ github.repository_owner }}
+          package-name: ${{ github.event.repository.name }}
+          package-type: container
+          min-versions-to-keep: 50
+          # Untagged versions are the per-arch manifests a live index still
+          # points at, so they must age out with their index, never on their own.
+          delete-only-untagged-versions: false
+
+      # Early warning: surfaces the remaining count in the run summary so growth
+      # is visible before it becomes another quota outage. Never fails the job.
+      - name: Report remaining versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          n=$(gh api \
+            "/orgs/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/versions" \
+            --paginate --jq '.[].id' 2>/dev/null | wc -l | tr -d ' ') || n="unknown"
+          {
+            echo "### ${{ github.event.repository.name }}"
+            echo ""
+            echo "Versions remaining after prune: **${n}** (~$((${n:-0} / 5)) releases)"
+          } >> "$GITHUB_STEP_SUMMARY"
+        continue-on-error: true
