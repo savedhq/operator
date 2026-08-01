@@ -1,15 +1,11 @@
 # More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
 #
-# The image used to package a prebuilt binary, so this file ignored everything
-# (`**`) and re-included only `dist/manager-*`. The Dockerfile is multi-stage
-# now and compiles from source in the build stage, so the Go source has to reach
-# the build context. Same denylist shape as the other Go repos.
-.git
-.github
-Dockerfile
-.dockerignore
-*.md
-bin
-dist
-testbin
-config
+# Allowlist, not a denylist. The Dockerfile packages a prebuilt binary again
+# (CI cross-compiles on the runner, see .github/workflows/ci.yml), so the Go
+# source no longer needs to reach the build context, only dist/manager-<arch>.
+#
+# This restores the pre-2026-07-30 shape. It became a denylist while the
+# Dockerfile compiled from source in a multi-stage build, which put `dist` on
+# the ignore list, and that silently breaks `COPY dist/manager-${TARGETARCH}`.
+**
+!dist/manager-*

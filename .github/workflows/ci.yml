@@ -1,21 +1,8 @@
-# Job graph, left to right:
-#   lint, golangci-lint (config pinned in .golangci.yml)
-#   test, manifests/generate/fmt/vet + envtest suite
-#   build, cross-compile + assemble & push the multi-arch image to GHCR
+# Test, build and publish the image. One job, native runner, arm64 only.
+# Why it is shaped this way: pm/docs/man/go-cicd.md ("As applied at saved").
 #
-# There is deliberately no `compile` job. It used to cross-compile per arch and
-# hand the binaries to `build` as Actions artifacts, which coupled every release
-# to the artifact storage quota, when that filled on 2026-07-30 the upload
-# failed, `compile` failed, and no image was published at all. The Dockerfile is
-# multi-stage now and buildx does the cross-compiling natively, so nothing here
-# touches artifact storage.
-#
-# The Dockerfile DOES compile in-image now, but its build stage is pinned to
-# `--platform=$BUILDPLATFORM`, so the Go toolchain runs on the runner's NATIVE
-# arch and cross-compiles via GOARCH. An unpinned build stage is what makes
-# buildx run the toolchain under QEMU (~40min for a single build); the pin is
-# load-bearing, do not remove it.
-#
+# Images are tagged :<short-sha> on main and :<tag> on a git tag, matching what
+# infra/clusters/oci/apps/**/deployment.yaml pins.
 name: ci
 
 on:
@@ -52,9 +39,20 @@ jobs:
           cache-dependency-path: go.sum
       - run: make lint
 
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  ci:
+    # arm64 only: every OCI node is Ampere, local dev is Apple Silicon. The
+    # runner is native for the target arch, so nothing is emulated.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -69,20 +67,19 @@ jobs:
       - name: Check generated files are up to date
         run: git diff --exit-code -- config/ api/ internal/
 
-  build:
-    needs: test
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v7
+      # Native build on the matrix runner, against the cache `make test` just
+      # filled. The Dockerfile only copies the result in.
+      - name: Build binary
+        if: github.event_name == 'push'
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH="${{ matrix.arch }}" \
+            go build -trimpath -ldflags="-s -w" -o "dist/manager-${{ matrix.arch }}" cmd/main.go
 
       - uses: docker/setup-buildx-action@v4
+        if: github.event_name == 'push'
 
       - uses: docker/login-action@v4
+        if: github.event_name == 'push'
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -90,6 +87,7 @@ jobs:
 
       - id: meta
         uses: docker/metadata-action@v6
+        if: github.event_name == 'push'
         # GHCR reads the package description off the *index* annotation, not the
         # per-manifest one it annotates by default, without `index` here the
         # package page shows "No description provided".
@@ -107,9 +105,10 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
       - uses: docker/build-push-action@v7
+        if: github.event_name == 'push'
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.arch }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
