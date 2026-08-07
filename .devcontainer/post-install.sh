@@ -5,7 +5,6 @@ echo "===================================="
 echo "Kubebuilder DevContainer Setup"
 echo "===================================="
 
-# Verify running as root (required for installing to /usr/local/bin and /etc)
 if [ "$(id -u)" -ne 0 ]; then
   echo "ERROR: This script must be run as root"
   exit 1
@@ -13,7 +12,6 @@ fi
 
 echo ""
 echo "Detecting system architecture..."
-# Detect architecture using uname
 MACHINE=$(uname -m)
 case "${MACHINE}" in
   x86_64)
@@ -36,7 +34,6 @@ echo "------------------------------------"
 
 BASH_COMPLETIONS_DIR="/usr/share/bash-completion/completions"
 
-# Enable bash-completion in root's .bashrc (devcontainer runs as root)
 if ! grep -q "source /usr/share/bash-completion/bash_completion" ~/.bashrc 2>/dev/null; then
   echo 'source /usr/share/bash-completion/bash_completion' >> ~/.bashrc
   echo "Added bash-completion to .bashrc"
@@ -47,7 +44,6 @@ echo "------------------------------------"
 echo "Installing development tools..."
 echo "------------------------------------"
 
-# Install kind
 if ! command -v kind &> /dev/null; then
   echo "Installing kind..."
   curl -Lo /usr/local/bin/kind "https://kind.sigs.k8s.io/dl/latest/kind-linux-${ARCH}"
@@ -55,7 +51,6 @@ if ! command -v kind &> /dev/null; then
   echo "kind installed successfully"
 fi
 
-# Generate kind bash completion
 if command -v kind &> /dev/null; then
   if kind completion bash > "${BASH_COMPLETIONS_DIR}/kind" 2>/dev/null; then
     echo "kind completion installed"
@@ -64,7 +59,6 @@ if command -v kind &> /dev/null; then
   fi
 fi
 
-# Install kubebuilder
 if ! command -v kubebuilder &> /dev/null; then
   echo "Installing kubebuilder..."
   curl -Lo /usr/local/bin/kubebuilder "https://go.kubebuilder.io/dl/latest/linux/${ARCH}"
@@ -72,7 +66,6 @@ if ! command -v kubebuilder &> /dev/null; then
   echo "kubebuilder installed successfully"
 fi
 
-# Generate kubebuilder bash completion
 if command -v kubebuilder &> /dev/null; then
   if kubebuilder completion bash > "${BASH_COMPLETIONS_DIR}/kubebuilder" 2>/dev/null; then
     echo "kubebuilder completion installed"
@@ -81,7 +74,6 @@ if command -v kubebuilder &> /dev/null; then
   fi
 fi
 
-# Install kubectl
 if ! command -v kubectl &> /dev/null; then
   echo "Installing kubectl..."
   KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
@@ -90,7 +82,6 @@ if ! command -v kubectl &> /dev/null; then
   echo "kubectl installed successfully"
 fi
 
-# Generate kubectl bash completion
 if command -v kubectl &> /dev/null; then
   if kubectl completion bash > "${BASH_COMPLETIONS_DIR}/kubectl" 2>/dev/null; then
     echo "kubectl completion installed"
@@ -99,7 +90,6 @@ if command -v kubectl &> /dev/null; then
   fi
 fi
 
-# Generate Docker bash completion
 if command -v docker &> /dev/null; then
   if docker completion bash > "${BASH_COMPLETIONS_DIR}/docker" 2>/dev/null; then
     echo "docker completion installed"
@@ -113,7 +103,6 @@ echo "------------------------------------"
 echo "Configuring Docker environment..."
 echo "------------------------------------"
 
-# Wait for Docker to be ready
 echo "Waiting for Docker to be ready..."
 for i in {1..30}; do
   if docker info >/dev/null 2>&1; then
@@ -126,7 +115,6 @@ for i in {1..30}; do
   sleep 1
 done
 
-# Create kind network (ignore if already exists)
 if ! docker network inspect kind >/dev/null 2>&1; then
   if docker network create kind >/dev/null 2>&1; then
     echo "Created kind network"

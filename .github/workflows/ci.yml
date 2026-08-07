@@ -1,8 +1,3 @@
-# Test, build and publish the image. One job, native runner, arm64 only.
-# Why it is shaped this way: pm/docs/man/go-cicd.md ("As applied at saved").
-#
-# Images are tagged :<short-sha> on main and :<tag> on a git tag, matching what
-# infra/clusters/oci/apps/**/deployment.yaml pins.
 name: ci
 
 on:
@@ -20,8 +15,6 @@ env:
 permissions:
   contents: read
 
-# A rapid second push makes the first run's image obsolete before it publishes,
-# so cancel it rather than paying for both. Tag builds are never cancelled.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -40,8 +33,6 @@ jobs:
       - run: make lint
 
   ci:
-    # arm64 only: every OCI node is Ampere, local dev is Apple Silicon. The
-    # runner is native for the target arch, so nothing is emulated.
     strategy:
       fail-fast: false
       matrix:
@@ -62,13 +53,9 @@ jobs:
           cache-dependency-path: go.sum
       - run: make test
 
-      # controller-gen output is committed; if `make test` changed it, the
-      # generated files in the PR are stale.
       - name: Check generated files are up to date
         run: git diff --exit-code -- config/ api/ internal/
 
-      # Native build on the matrix runner, against the cache `make test` just
-      # filled. The Dockerfile only copies the result in.
       - name: Build binary
         if: github.event_name == 'push'
         run: |
@@ -88,14 +75,10 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         if: github.event_name == 'push'
-        # GHCR reads the package description off the *index* annotation, not the
-        # per-manifest one it annotates by default, without `index` here the
-        # package page shows "No description provided".
         env:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: index,manifest
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # git tag -> :v0.1.0 ; main -> :<short-sha> + :latest
           tags: |
             type=ref,event=tag
             type=sha,format=short,enable={{is_default_branch}}
