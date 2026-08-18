@@ -12,16 +12,21 @@ generated stub.
 Today the operator is a **manager layer for `local-worker`**: it runs customer-side
 backup workers in-cluster and hands each one its `config.yaml`. Because that file
 carries a WorkOS org-scoped API key, it lives in a **Secret**, never a ConfigMap,
-see `../pm/docs/arch/auth.md` and `.claude/rules/security.md`.
+see [`auth#machine-authentication-workos-org-scoped`](../pm/arch/auth.md).
 
 Later this grows to backing things up from Kubernetes directly (PVCs, directories,
-files). Those get their **own API group** (e.g. `backup.saved.sh`) rather than being
-bolted onto `worker.saved.sh`, the same split Kubernetes itself uses between `apps`
-and `storage`.
+files). Those get their **own API group**, `backup.saved.sh`, rather than being bolted
+onto `worker.saved.sh`, the same split Kubernetes itself uses between `apps` and
+`storage`.
 
-Before adding anything, check `../pm/planning/planning.md` for the current milestone
-and `../pm/docs/arch/infra.md` for how this fits the rest of the infrastructure.
-Scope decisions belong in an `arch/` doc first.
+**The design lives in [`kubernetes.md`](../pm/arch/kubernetes.md), read it first.** In
+particular: Kubernetes deploys and declares, it never schedules and never executes a
+backup, and a worker Deployment is pinned to one replica because a worker id is a task
+queue.
+
+Before adding anything, check `../pm/planning/m1.md` for the current milestone.
+Scope decisions belong in [`kubernetes.md`](../pm/arch/kubernetes.md) first.
+`../pm/arch/infra.md` is **our own** cluster, which is a different subject.
 
 ## API
 
@@ -48,7 +53,7 @@ The image (`ghcr.io/savedhq/operator`) runs the controller itself, it is not the
 `LocalWorker.spec.image`.
 
 **The Dockerfile packages a prebuilt binary; it does not compile.** `dist/manager-<arch>`
-must exist before `docker build`n/a`make docker-build` and the CI `compile` job both
+must exist before `docker build`. `make docker-build` and the CI `compile` job both
 handle that. Compiling in-image instead makes buildx run the Go toolchain under QEMU
 for the non-native arch, which took ~40min per build; cross-compiling natively takes
 ~30s for both arches.
@@ -62,7 +67,7 @@ stock kubebuilder flow; see the
 
 ## CI
 
-- `.github/workflows/ci.yml`n/a`lint` and `test` on every push and PR, then
+- `.github/workflows/ci.yml`: `lint` and `test` on every push and PR, then
   `compile` (one native job per arch) and `build`, which pushes a multi-arch image to
   `ghcr.io/savedhq/operator` on pushes to `main` and on `v*` tags (`:<short-sha>` +
   `:latest` on main, `:<tag>` on a tag). Every job is capped at
